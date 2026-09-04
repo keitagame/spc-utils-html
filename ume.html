@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Binary → 64KB RAM</title>
+
+<style>
+    body {
+        background: #111;
+        color: #eee;
+        font-family: monospace;
+        padding: 30px;
+    }
+
+    .box {
+        border: 1px solid #444;
+        padding: 20px;
+        margin-bottom: 20px;
+    }
+
+    button {
+        margin-top: 15px;
+        padding: 10px 25px;
+        background: #222;
+        color: #fff;
+        border: 1px solid #666;
+        cursor: pointer;
+    }
+
+    button:hover {
+        background: #333;
+    }
+
+    #status {
+        white-space: pre-wrap;
+        margin-top: 20px;
+    }
+</style>
+</head>
+
+<body>
+
+<h1>Binary → 64KB RAM</h1>
+
+<div class="box">
+
+    <p>
+        小さいバイナリを64KBのRAMサイズに拡張します。
+    </p>
+
+    <input
+        type="file"
+        id="inputFile"
+        accept=".bin,.ram"
+    >
+
+    <br>
+
+    <button id="convert">
+        64KB RAMを作成
+    </button>
+
+</div>
+
+<div id="status"></div>
+
+
+<script>
+
+const RAM_SIZE = 0x10000; // 65536 bytes
+
+
+document
+.getElementById("convert")
+.addEventListener("click", async () => {
+
+    const input =
+        document.getElementById("inputFile");
+
+    const status =
+        document.getElementById("status");
+
+    const file =
+        input.files[0];
+
+
+    if (!file) {
+
+        status.textContent =
+            "バイナリファイルを選択してください。";
+
+        return;
+    }
+
+
+    try {
+
+        const data =
+            new Uint8Array(
+                await file.arrayBuffer()
+            );
+
+
+        /*
+         * 64KB RAMを作成
+         *
+         * TypedArrayはデフォルトで
+         * すべて0x00になっています。
+         */
+
+        const ram =
+            new Uint8Array(RAM_SIZE);
+
+
+        /*
+         * ファイルが64KBを超えていた場合は
+         * 先頭64KBだけ使用
+         */
+
+        const copySize =
+            Math.min(
+                data.length,
+                RAM_SIZE
+            );
+
+
+        /*
+         * RAMの先頭から配置
+         */
+
+        ram.set(
+            data.subarray(
+                0,
+                copySize
+            ),
+            0
+        );
+
+
+        /*
+         * ダウンロード
+         */
+
+        const blob =
+            new Blob(
+                [ram],
+                {
+                    type:
+                        "application/octet-stream"
+                }
+            );
+
+
+        const url =
+            URL.createObjectURL(blob);
+
+
+        const a =
+            document.createElement("a");
+
+
+        a.href = url;
+
+
+        a.download =
+            file.name.replace(
+                /\.[^.]+$/,
+                ""
+            ) + ".ram";
+
+
+        a.click();
+
+
+        URL.revokeObjectURL(url);
+
+
+        /*
+         * 結果表示
+         */
+
+        status.textContent =
+            "作成完了\n\n" +
+
+            `元ファイル : ${file.name}\n` +
+
+            `元サイズ   : ${data.length} bytes\n` +
+
+            `コピー     : ${copySize} bytes\n` +
+
+            `埋め込み   : ${RAM_SIZE - copySize} bytes\n` +
+
+            `出力サイズ : ${ram.length} bytes\n` +
+
+            `出力       : ${a.download}`;
+
+
+    } catch (error) {
+
+        console.error(error);
+
+        status.textContent =
+            "エラー: " + error.message;
+    }
+
+});
+
+</script>
+
+</body>
+</html>
