@@ -10,7 +10,7 @@
   textarea { height:420px; font-size:14px; }
   button { background:#0e639c; color:white; border:none; padding:8px 16px; margin:5px 5px 5px 0; cursor:pointer; }
   button:hover { background:#1177bb; }
-  #output { height:220px; overflow:auto; white-space:pre-wrap; }
+  #output { height:240px; overflow:auto; white-space:pre-wrap; }
   .error { color:#f44747; }
   .info { color:#ce9178; }
   .row { display:flex; gap:10px; }
@@ -31,8 +31,8 @@ start:
   mov x,#$ef
   mov sp,x
 
-  mov a,#$aa
-  mov $f4,a          ; port0
+  mov $f4,#$aa        ; dp, #imm  → 8F AA F4
+  mov $f5,#$bb
 
 loop:
   mov a,$f4
@@ -140,9 +140,9 @@ const opcodes = {
   "MOV [dp+X],A": {op:0xC7, len:2},
   "MOV [dp]+Y,A": {op:0xD7, len:2},
 
-  // MOV dp,dp / dp,#imm
-  "MOV dp,dp":    {op:0xFA, len:3},
-  "MOV dp,#imm":  {op:0x8F, len:3},
+  // MOV dp,dp / dp,#imm   ★ バイナリ順が逆
+  "MOV dp,dp":    {op:0xFA, len:3, reverse:true},
+  "MOV dp,#imm":  {op:0x8F, len:3, reverse:true},
 
   // ADC
   "ADC A,#imm":   {op:0x88, len:2},
@@ -155,8 +155,8 @@ const opcodes = {
   "ADC A,[dp+X]": {op:0x87, len:2},
   "ADC A,[dp]+Y": {op:0x97, len:2},
   "ADC (X),(Y)":  {op:0x99, len:1},
-  "ADC dp,#imm":  {op:0x98, len:3},
-  "ADC dp,dp":    {op:0x89, len:3},
+  "ADC dp,#imm":  {op:0x98, len:3, reverse:true},
+  "ADC dp,dp":    {op:0x89, len:3, reverse:true},
 
   // SBC
   "SBC A,#imm":   {op:0xA8, len:2},
@@ -169,8 +169,8 @@ const opcodes = {
   "SBC A,[dp+X]": {op:0xA7, len:2},
   "SBC A,[dp]+Y": {op:0xB7, len:2},
   "SBC (X),(Y)":  {op:0xB9, len:1},
-  "SBC dp,#imm":  {op:0xB8, len:3},
-  "SBC dp,dp":    {op:0xA9, len:3},
+  "SBC dp,#imm":  {op:0xB8, len:3, reverse:true},
+  "SBC dp,dp":    {op:0xA9, len:3, reverse:true},
 
   // CMP
   "CMP A,#imm":   {op:0x68, len:2},
@@ -189,8 +189,8 @@ const opcodes = {
   "CMP Y,#imm":   {op:0xAD, len:2},
   "CMP Y,dp":     {op:0x7E, len:2},
   "CMP Y,!abs":   {op:0x5E, len:3},
-  "CMP dp,#imm":  {op:0x78, len:3},
-  "CMP dp,dp":    {op:0x69, len:3},
+  "CMP dp,#imm":  {op:0x78, len:3, reverse:true},
+  "CMP dp,dp":    {op:0x69, len:3, reverse:true},
 
   // AND / OR / EOR
   "AND A,#imm":   {op:0x28, len:2},
@@ -203,8 +203,8 @@ const opcodes = {
   "AND A,[dp+X]": {op:0x27, len:2},
   "AND A,[dp]+Y": {op:0x37, len:2},
   "AND (X),(Y)":  {op:0x39, len:1},
-  "AND dp,#imm":  {op:0x38, len:3},
-  "AND dp,dp":    {op:0x29, len:3},
+  "AND dp,#imm":  {op:0x38, len:3, reverse:true},
+  "AND dp,dp":    {op:0x29, len:3, reverse:true},
 
   "OR A,#imm":    {op:0x08, len:2},
   "OR A,dp":      {op:0x04, len:2},
@@ -216,8 +216,8 @@ const opcodes = {
   "OR A,[dp+X]":  {op:0x07, len:2},
   "OR A,[dp]+Y":  {op:0x17, len:2},
   "OR (X),(Y)":   {op:0x19, len:1},
-  "OR dp,#imm":   {op:0x18, len:3},
-  "OR dp,dp":     {op:0x09, len:3},
+  "OR dp,#imm":   {op:0x18, len:3, reverse:true},
+  "OR dp,dp":     {op:0x09, len:3, reverse:true},
 
   "EOR A,#imm":   {op:0x48, len:2},
   "EOR A,dp":     {op:0x44, len:2},
@@ -229,8 +229,8 @@ const opcodes = {
   "EOR A,[dp+X]": {op:0x47, len:2},
   "EOR A,[dp]+Y": {op:0x57, len:2},
   "EOR (X),(Y)":  {op:0x59, len:1},
-  "EOR dp,#imm":  {op:0x58, len:3},
-  "EOR dp,dp":    {op:0x49, len:3},
+  "EOR dp,#imm":  {op:0x58, len:3, reverse:true},
+  "EOR dp,dp":    {op:0x49, len:3, reverse:true},
 
   // INC / DEC
   "INC A":        {op:0xBC, len:1},
@@ -273,7 +273,7 @@ const opcodes = {
   "SUBW YA,dp":   {op:0x9A, len:2},
   "CMPW YA,dp":   {op:0x5A, len:2},
 
-  // Branches (relative)
+  // Branches
   "BRA rel":      {op:0x2F, len:2},
   "BEQ rel":      {op:0xF0, len:2},
   "BNE rel":      {op:0xD0, len:2},
@@ -290,7 +290,7 @@ const opcodes = {
   "JMP [!abs+X]": {op:0x1F, len:3},
   "PCALL upage":  {op:0x4F, len:2},
 
-  // Bit ops (handled specially)
+  // Bit / special
   "SET1 dp.bit":  {op:0x02, len:2},
   "CLR1 dp.bit":  {op:0x12, len:2},
   "BBS dp.bit,rel":{op:0x03, len:3},
@@ -329,14 +329,10 @@ function isNumber(str) {
 
 function resolveOperand(op, pass) {
   op = String(op).trim();
-  // strip leading ! for absolute
   if (op.startsWith("!")) op = op.slice(1);
 
-  if (isNumber(op)) {
-    return parseNumber(op);
-  }
+  if (isNumber(op)) return parseNumber(op);
 
-  // labels are always stored in UPPERCASE
   const key = op.toUpperCase();
   if (labels[key] !== undefined) return labels[key];
 
@@ -348,13 +344,11 @@ function assembleLine(line, pass) {
   line = line.replace(/;.*$/, "").trim();
   if (!line) return;
 
-  // Label definition
+  // Label
   if (line.endsWith(":")) {
     const name = line.slice(0, -1).trim().toUpperCase();
     if (pass === 1) {
-      if (labels[name] !== undefined) {
-        errors.push(`Duplicate label: ${name}`);
-      }
+      if (labels[name] !== undefined) errors.push(`Duplicate label: ${name}`);
       labels[name] = currentAddr;
     }
     return;
@@ -402,7 +396,7 @@ function assembleLine(line, pass) {
     return;
   }
 
-  // SET1 / CLR1 / BBS / BBC  (dp.bit form)
+  // SET1 / CLR1 / BBS / BBC
   if (["SET1","CLR1","BBS","BBC"].includes(mnemonic)) {
     const m = operands.match(/^(\$?[0-9A-F]+|[A-Z_][A-Z0-9_]*)\.([0-7])(?:,(.+))?$/i);
     if (!m) {
@@ -428,7 +422,7 @@ function assembleLine(line, pass) {
     return;
   }
 
-  // Normal instructions
+  // Normal match
   let matched = false;
   const candidates = Object.keys(opcodes).filter(k =>
     k === mnemonic || k.startsWith(mnemonic + " ")
@@ -436,9 +430,8 @@ function assembleLine(line, pass) {
 
   for (const key of candidates) {
     const def = opcodes[key];
-    const pattern = key.slice(mnemonic.length).trim(); // e.g. "A,#imm"
+    const pattern = key.slice(mnemonic.length).trim();
 
-    // implied
     if (!pattern) {
       if (!operands) {
         if (pass === 2) binary.push(def.op);
@@ -449,7 +442,6 @@ function assembleLine(line, pass) {
       continue;
     }
 
-    // build regex
     let regexStr = pattern
       .replace(/\+/g, "\\+")
       .replace(/\[/g, "\\[")
@@ -469,7 +461,8 @@ function assembleLine(line, pass) {
     currentAddr++;
 
     // emit operands
-    if (pattern.includes("#imm")) {
+    if (pattern.includes("#imm") && !pattern.includes("dp")) {
+      // simple immediate (A,#imm etc.)
       const val = resolveOperand(m[1], pass) & 0xFF;
       if (pass === 2) binary.push(val);
       currentAddr++;
@@ -482,18 +475,22 @@ function assembleLine(line, pass) {
       }
       currentAddr += 2;
     }
+    else if (pattern === "dp,#imm" || pattern === "dp,dp") {
+      // ★ 逆順：ソース（右）を先に、デスト（左）を後に
+      const left  = resolveOperand(m[1], pass) & 0xFF; // dest
+      const right = resolveOperand(m[2], pass) & 0xFF; // src / imm
+
+      if (pass === 2) {
+        binary.push(right); // imm or source first
+        binary.push(left);  // dest second
+      }
+      currentAddr += 2;
+    }
     else if (pattern.includes("dp") && !pattern.includes("rel")) {
-      // first dp
+      // single dp
       const val = resolveOperand(m[1], pass) & 0xFF;
       if (pass === 2) binary.push(val);
       currentAddr++;
-
-      // second operand (dp or #imm)
-      if (pattern.includes(",dp") || pattern.includes(",#imm")) {
-        const val2 = resolveOperand(m[2], pass) & 0xFF;
-        if (pass === 2) binary.push(val2);
-        currentAddr++;
-      }
     }
     else if (pattern.includes("rel")) {
       const target = resolveOperand(m[1], pass);
@@ -531,24 +528,19 @@ function assemble() {
   binary = [];
   currentAddr = 0x0200;
 
-  // ---------- Pass 1: labels & size ----------
+  // Pass 1
   for (let raw of lines) {
     let line = raw.replace(/;.*$/, "").trim();
     if (!line) continue;
-
-    // equ / =
     if (/=/.test(line) || line.toLowerCase().startsWith("equ")) {
       const m = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*(?:=\s*|equ\s+)(.+)$/i);
-      if (m) {
-        labels[m[1].toUpperCase()] = parseNumber(m[2]);
-      }
+      if (m) labels[m[1].toUpperCase()] = parseNumber(m[2]);
       continue;
     }
-
     assembleLine(line, 1);
   }
 
-  // ---------- Pass 2: generate code ----------
+  // Pass 2
   binary = [];
   currentAddr = 0x0200;
   for (let raw of lines) {
@@ -558,19 +550,18 @@ function assemble() {
     assembleLine(line, 2);
   }
 
-  // ---------- Output ----------
+  // Output
   let out = "";
   if (errors.length) {
     out += "<span class='error'>Errors:\n" + errors.join("\n") + "</span>\n\n";
   }
 
   out += `<span class='info'>Labels:</span>\n`;
-  const sorted = Object.keys(labels).sort();
-  for (const k of sorted) {
+  for (const k of Object.keys(labels).sort()) {
     out += `  ${k.padEnd(12)} = $${labels[k].toString(16).toUpperCase().padStart(4,"0")}\n`;
   }
 
-  out += `\n<span class='info'>Binary (${binary.length} bytes) starting at $0200:</span>\n`;
+  out += `\n<span class='info'>Binary (${binary.length} bytes) @ $0200:</span>\n`;
   for (let i = 0; i < binary.length; i += 16) {
     const addr = (0x0200 + i).toString(16).toUpperCase().padStart(4, "0");
     const hex = binary.slice(i, i + 16)
@@ -583,11 +574,8 @@ function assemble() {
 }
 
 function downloadBin() {
-  if (!binary.length) {
-    alert("Assemble first");
-    return;
-  }
-  const blob = new Blob([new Uint8Array(binary)], { type: "application/octet-stream" });
+  if (!binary.length) { alert("Assemble first"); return; }
+  const blob = new Blob([new Uint8Array(binary)], {type:"application/octet-stream"});
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = "spc700.bin";
