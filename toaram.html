@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SPC → RAM Converter</title>
+
+<style>
+    body {
+        font-family: sans-serif;
+        background: #111;
+        color: #eee;
+        padding: 30px;
+    }
+
+    button {
+        padding: 10px 20px;
+        margin-top: 15px;
+        cursor: pointer;
+    }
+
+    #status {
+        margin-top: 15px;
+        white-space: pre-wrap;
+    }
+</style>
+</head>
+
+<body>
+
+<h1>SPC → RAM Converter</h1>
+
+<input type="file" id="spcFile" accept=".spc">
+
+<br>
+
+<button id="convert">RAMを取り出す</button>
+
+<div id="status"></div>
+
+<script>
+
+const SPC_HEADER_SIZE = 0x100;
+const RAM_SIZE = 0x10000;
+
+// SPCの最小サイズ
+const MIN_SPC_SIZE =
+    0x100 +
+    0x10000 +
+    0x80 +
+    0x40 +
+    0x40;
+
+function isSPC(data) {
+
+    if (data.length < 0x23) {
+        return false;
+    }
+
+    const header = new TextDecoder().decode(
+        data.subarray(0, 0x21)
+    );
+
+    return header ===
+        "SNES-SPC700 Sound File Data v0.30";
+}
+
+document.getElementById("convert")
+.addEventListener("click", async () => {
+
+    const input =
+        document.getElementById("spcFile");
+
+    const status =
+        document.getElementById("status");
+
+    if (!input.files.length) {
+        status.textContent =
+            "SPCファイルを選択してください。";
+        return;
+    }
+
+    const file = input.files[0];
+
+    try {
+
+        const buffer =
+            await file.arrayBuffer();
+
+        const spc =
+            new Uint8Array(buffer);
+
+        status.textContent =
+            `読み込みサイズ: ${spc.length} bytes\n`;
+
+        // SPCヘッダー確認
+        if (!isSPC(spc)) {
+
+            status.textContent +=
+                "エラー: SPCファイルではありません。";
+
+            return;
+        }
+
+        // RAMが存在するか確認
+        if (spc.length < 0x10100) {
+
+            status.textContent +=
+                "エラー: SPCのサイズが不足しています。";
+
+            return;
+        }
+
+        /*
+         * SPC構造
+         *
+         * 000000 - 0000FF  Header
+         * 000100 - 0100FF  RAM
+         */
+
+        const ram =
+            spc.slice(
+                SPC_HEADER_SIZE,
+                SPC_HEADER_SIZE + RAM_SIZE
+            );
+
+        // RAMファイルとして保存
+        const blob =
+            new Blob(
+                [ram],
+                {
+                    type:
+                        "application/octet-stream"
+                }
+            );
+
+        const url =
+            URL.createObjectURL(blob);
+
+        const a =
+            document.createElement("a");
+
+        a.href = url;
+
+        a.download =
+            file.name.replace(
+                /\.spc$/i,
+                ""
+            ) + ".ram";
+
+        a.click();
+
+        URL.revokeObjectURL(url);
+
+        status.textContent +=
+            `RAM取り出し完了\n` +
+            `RAMサイズ: ${ram.length} bytes\n` +
+            `出力: ${a.download}`;
+
+    }
+    catch (e) {
+
+        console.error(e);
+
+        status.textContent =
+            "エラー: " + e.message;
+    }
+
+});
+
+</script>
+
+</body>
+</html>
