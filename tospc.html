@@ -2,246 +2,465 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>RAM → SPC Converter</title>
+
 <style>
-    body {
-        font-family: sans-serif;
-        background: #111;
-        color: #eee;
-        padding: 30px;
-    }
+body {
+    background:#111;
+    color:#eee;
+    font-family:monospace;
+    padding:20px;
+}
 
-    button {
-        padding: 10px 20px;
-        margin-top: 15px;
-        cursor: pointer;
-    }
+input {
+    background:#222;
+    color:#fff;
+    border:1px solid #555;
+    padding:5px;
+    width:100px;
+}
 
-    #status {
-        margin-top: 15px;
-        white-space: pre-wrap;
-    }
+textarea {
+    width:100%;
+    height:150px;
+    background:#181818;
+    color:#ddd;
+    border:1px solid #555;
+    font-family:monospace;
+}
+
+.section {
+    border:1px solid #444;
+    padding:15px;
+    margin:15px 0;
+}
+
+label {
+    display:inline-block;
+    width:70px;
+}
+
+button {
+    padding:10px 25px;
+    background:#333;
+    color:#fff;
+    border:1px solid #777;
+    cursor:pointer;
+}
 </style>
 </head>
+
 <body>
 
-<h1>RAM → SPC Converter</h1>
+<h1>RAM → SPC</h1>
 
-<p>64KBのSPC700 RAMデータを選択してください。</p>
+<div class="section">
 
-<input type="file" id="ramFile" accept=".bin,.ram">
+<h2>RAM</h2>
 
-<br>
+<input type="file" id="ramFile" accept=".ram,.bin">
 
-<button id="convert">SPCを作成</button>
+</div>
 
-<div id="status"></div>
+
+<div class="section">
+
+<h2>SPC700 Registers</h2>
+
+<label>PC</label>
+<input id="pc" value="0100" maxlength="4">
+
+<br><br>
+
+<label>A</label>
+<input id="a" value="00" maxlength="2">
+
+<label>X</label>
+<input id="x" value="00" maxlength="2">
+
+<label>Y</label>
+<input id="y" value="00" maxlength="2">
+
+<br><br>
+
+<label>PSW</label>
+<input id="psw" value="00" maxlength="2">
+
+<label>SP</label>
+<input id="sp" value="EF" maxlength="2">
+
+</div>
+
+
+<div class="section">
+
+<h2>DSP Registers</h2>
+
+<p>
+128バイトを16進数で入力します。<br>
+空欄部分は00になります。
+</p>
+
+<textarea id="dsp"></textarea>
+
+</div>
+
+
+<div class="section">
+
+<h2>SPC Metadata</h2>
+
+<label>Song</label>
+<input id="song" value="RAM Dump">
+
+<br><br>
+
+<label>Game</label>
+<input id="game" value="Unknown Game">
+
+<br><br>
+
+<label>Artist</label>
+<input id="artist" value="Unknown Artist">
+
+</div>
+
+
+<button id="convert">
+SPCを作成
+</button>
+
+<p id="status"></p>
+
 
 <script>
-const SPC_HEADER_SIZE = 0x100;
+
 const RAM_SIZE = 0x10000;
+const HEADER_SIZE = 0x100;
 const DSP_SIZE = 0x80;
 const EXTRA_SIZE = 0x40;
 const IPL_SIZE = 0x40;
 
-// 標準SPC700 IPL ROM
+
+/*
+ * 標準 SPC700 IPL ROM
+ */
 const IPL_ROM = new Uint8Array([
-    0xCD, 0xEF, 0xBD, 0xE8, 0x00, 0xC6, 0x1D, 0xD0,
-    0xFC, 0x8F, 0xAA, 0xF4, 0x8F, 0xBB, 0xF5, 0x78,
-    0xCC, 0xF4, 0xD0, 0xFB, 0x2F, 0x19, 0xEB, 0xF4,
-    0xD0, 0xFC, 0x7E, 0xF4, 0xD0, 0x0B, 0xE4, 0xF5,
-    0xCB, 0xF4, 0xD7, 0x00, 0xFC, 0xD0, 0xF3, 0xAB,
-    0x01, 0x10, 0xEF, 0x7E, 0xF4, 0x10, 0xEB, 0xBA,
-    0xF6, 0x00, 0xF5, 0xF7, 0x30, 0xFB, 0x7E, 0xF4,
-    0x10, 0xF5, 0x00, 0xC0, 0xFF, 0xFF, 0x00, 0x00
+    0xCD,0xEF,0xBD,0xE8,0x00,0xC6,0x1D,0xD0,
+    0xFC,0x8F,0xAA,0xF4,0x8F,0xBB,0xF5,0x78,
+    0xCC,0xF4,0xD0,0xFB,0x2F,0x19,0xEB,0xF4,
+    0xD0,0xFC,0x7E,0xF4,0xD0,0x0B,0xE4,0xF5,
+    0xCB,0xF4,0xD7,0x00,0xFC,0xD0,0xF3,0xAB,
+    0x01,0x10,0xEF,0x7E,0xF4,0x10,0xEB,0xBA,
+    0xF6,0x00,0xF5,0xF7,0x30,0xFB,0x7E,0xF4,
+    0x10,0xF5,0x00,0xC0,0xFF,0xFF,0x00,0x00
 ]);
 
-function writeString(array, offset, length, text) {
-    const bytes = new TextEncoder().encode(text);
+
+function hex(value, digits) {
+
+    value = parseInt(value, 16);
+
+    if (Number.isNaN(value))
+        value = 0;
+
+    return value & ((1 << (digits * 4)) - 1);
+}
+
+
+function writeString(buf, offset, length, str) {
+
+    const data =
+        new TextEncoder().encode(str);
 
     for (let i = 0; i < length; i++) {
-        array[offset + i] = 0;
-    }
 
-    for (let i = 0; i < Math.min(bytes.length, length); i++) {
-        array[offset + i] = bytes[i];
+        buf[offset + i] =
+            i < data.length
+                ? data[i]
+                : 0;
     }
 }
 
+
+function parseDSP(text) {
+
+    const result =
+        new Uint8Array(DSP_SIZE);
+
+    const values =
+        text
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean);
+
+    for (
+        let i = 0;
+        i < Math.min(values.length, DSP_SIZE);
+        i++
+    ) {
+
+        result[i] =
+            parseInt(values[i], 16) & 0xff;
+    }
+
+    return result;
+}
+
+
 function createSPC(ram) {
+
+    const spc =
+        new Uint8Array(
+            HEADER_SIZE +
+            RAM_SIZE +
+            DSP_SIZE +
+            EXTRA_SIZE +
+            IPL_SIZE
+        );
+
     /*
-        SPCファイル構造
+     * =========================
+     * Header
+     * =========================
+     */
 
-        00000-000FF  Header
-        00100-100FF  64KB RAM
-        10100-1017F  DSP Registers
-        10180-101BF  Extra RAM
-        101C0-101FF  IPL ROM
-    */
-
-    const totalSize =
-        SPC_HEADER_SIZE +
-        RAM_SIZE +
-        DSP_SIZE +
-        EXTRA_SIZE +
-        IPL_SIZE;
-
-    const spc = new Uint8Array(totalSize);
-
-    // ========================================
-    // SPC Header
-    // ========================================
-
-    const header = spc.subarray(0, SPC_HEADER_SIZE);
-
-    // SPC識別文字列
     writeString(
-        header,
+        spc,
         0x00,
         0x21,
         "SNES-SPC700 Sound File Data v0.30"
     );
 
-    // 0x21 = 0x1A
-    header[0x21] = 0x1A;
+    spc[0x21] = 0x1A;
+    spc[0x22] = 0x1A;
 
-    // Version / reserved
-    header[0x22] = 0x1A;
-    header[0x23] = 0x1A;
+    /*
+     * SPC700 Registers
+     */
 
-    // SPC700レジスタ
-    // PC
-    header[0x25] = 0x00;
-    header[0x26] = 0x00;
+    const pc =
+        hex(
+            document.getElementById("pc").value,
+            4
+        );
 
-    // A
-    header[0x27] = 0x00;
+    const a =
+        hex(
+            document.getElementById("a").value,
+            2
+        );
 
-    // X
-    header[0x28] = 0x00;
+    const x =
+        hex(
+            document.getElementById("x").value,
+            2
+        );
 
-    // Y
-    header[0x29] = 0x00;
+    const y =
+        hex(
+            document.getElementById("y").value,
+            2
+        );
 
-    // PSW
-    header[0x2A] = 0x00;
+    const psw =
+        hex(
+            document.getElementById("psw").value,
+            2
+        );
 
-    // SP
-    header[0x2B] = 0xEF;
+    const sp =
+        hex(
+            document.getElementById("sp").value,
+            2
+        );
 
-    // ========================================
-    // メタデータ
-    // ========================================
 
-    writeString(header, 0x2E, 32, "RAM Dump");
-    writeString(header, 0x4E, 32, "Unknown Game");
-    writeString(header, 0x6E, 32, "Unknown Artist");
-    writeString(header, 0x7E, 32, "RAM to SPC Converter");
+    /*
+     * PCはリトルエンディアン
+     */
 
-    // コメント
+    spc[0x25] =
+        pc & 0xff;
+
+    spc[0x26] =
+        (pc >> 8) & 0xff;
+
+    spc[0x27] = a;
+    spc[0x28] = x;
+    spc[0x29] = y;
+    spc[0x2A] = psw;
+    spc[0x2B] = sp;
+
+
+    /*
+     * Metadata
+     */
+
     writeString(
-        header,
-        0x9E,
-        18,
-        "Created from RAM dump"
+        spc,
+        0x2E,
+        32,
+        document.getElementById("song").value
     );
 
-    // ========================================
-    // RAM
-    // ========================================
+    writeString(
+        spc,
+        0x4E,
+        32,
+        document.getElementById("game").value
+    );
 
-    spc.set(ram, SPC_HEADER_SIZE);
+    writeString(
+        spc,
+        0x6E,
+        32,
+        document.getElementById("artist").value
+    );
 
-    // ========================================
-    // DSP Registers
-    // ========================================
 
-    // デフォルト値 0x00
-    // そのまま0で埋める
+    /*
+     * =========================
+     * RAM
+     * =========================
+     */
+
+    spc.set(
+        ram,
+        HEADER_SIZE
+    );
+
+
+    /*
+     * =========================
+     * DSP
+     * =========================
+     */
+
+    const dsp =
+        parseDSP(
+            document.getElementById("dsp").value
+        );
+
+    spc.set(
+        dsp,
+        HEADER_SIZE + RAM_SIZE
+    );
+
+
+    /*
+     * =========================
+     * Extra RAM
+     * =========================
+     */
+
+    const extraOffset =
+        HEADER_SIZE +
+        RAM_SIZE +
+        DSP_SIZE;
+
     spc.fill(
-        0x00,
-        SPC_HEADER_SIZE + RAM_SIZE,
-        SPC_HEADER_SIZE + RAM_SIZE + DSP_SIZE
+        0,
+        extraOffset,
+        extraOffset + EXTRA_SIZE
     );
 
-    // ========================================
-    // Extra RAM
-    // ========================================
 
-    spc.fill(
-        0x00,
-        SPC_HEADER_SIZE + RAM_SIZE + DSP_SIZE,
-        SPC_HEADER_SIZE + RAM_SIZE + DSP_SIZE + EXTRA_SIZE
-    );
-
-    // ========================================
-    // IPL ROM
-    // ========================================
+    /*
+     * =========================
+     * IPL ROM
+     * =========================
+     */
 
     const iplOffset =
-        SPC_HEADER_SIZE +
-        RAM_SIZE +
-        DSP_SIZE +
+        extraOffset +
         EXTRA_SIZE;
 
-    spc.set(IPL_ROM, iplOffset);
+    spc.set(
+        IPL_ROM,
+        iplOffset
+    );
+
 
     return spc;
 }
 
-document.getElementById("convert").addEventListener("click", async () => {
-    const input = document.getElementById("ramFile");
-    const status = document.getElementById("status");
 
-    if (!input.files.length) {
-        status.textContent = "RAMファイルを選択してください。";
+document
+.getElementById("convert")
+.addEventListener("click", async () => {
+
+    const file =
+        document.getElementById("ramFile")
+        .files[0];
+
+    const status =
+        document.getElementById("status");
+
+    if (!file) {
+
+        status.textContent =
+            "RAMファイルを選択してください。";
+
         return;
     }
 
-    const file = input.files[0];
 
-    try {
-        const buffer = await file.arrayBuffer();
-        const data = new Uint8Array(buffer);
-
-        status.textContent =
-            `読み込みサイズ: ${data.length} bytes\n`;
-
-        if (data.length !== RAM_SIZE) {
-            status.textContent +=
-                `エラー: RAMは65536 bytes必要です。\n` +
-                `現在: ${data.length} bytes`;
-            return;
-        }
-
-        const spc = createSPC(data);
-
-        const blob = new Blob(
-            [spc],
-            { type: "application/octet-stream" }
+    const data =
+        new Uint8Array(
+            await file.arrayBuffer()
         );
 
-        const url = URL.createObjectURL(blob);
 
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = file.name.replace(/\.[^.]+$/, "") + ".spc";
-        a.click();
+    if (data.length !== RAM_SIZE) {
 
-        URL.revokeObjectURL(url);
-
-        status.textContent +=
-            `SPC作成完了\n` +
-            `SPCサイズ: ${spc.length} bytes\n` +
-            `出力: ${a.download}`;
-    }
-    catch (e) {
-        console.error(e);
         status.textContent =
-            "エラー: " + e.message;
+            `RAMサイズが違います: ` +
+            `${data.length} bytes\n` +
+            `65536 bytes必要です。`;
+
+        return;
     }
+
+
+    const spc =
+        createSPC(data);
+
+
+    const blob =
+        new Blob(
+            [spc],
+            {
+                type:
+                    "application/octet-stream"
+            }
+        );
+
+
+    const url =
+        URL.createObjectURL(blob);
+
+    const a =
+        document.createElement("a");
+
+    a.href = url;
+
+    a.download =
+        file.name.replace(
+            /\.(ram|bin)$/i,
+            ""
+        ) + ".spc";
+
+    a.click();
+
+    URL.revokeObjectURL(url);
+
+
+    status.textContent =
+        `SPC作成完了\n` +
+        `サイズ: ${spc.length} bytes`;
 });
+
 </script>
 
 </body>
