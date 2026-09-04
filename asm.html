@@ -10,15 +10,16 @@
   textarea { height:420px; font-size:14px; }
   button { background:#0e639c; color:white; border:none; padding:8px 16px; margin:5px 5px 5px 0; cursor:pointer; }
   button:hover { background:#1177bb; }
-  #output { height:240px; overflow:auto; white-space:pre-wrap; }
+  #output { height:260px; overflow:auto; white-space:pre-wrap; }
   .error { color:#f44747; }
   .info { color:#ce9178; }
+  .ok { color:#4ec9b0; }
   .row { display:flex; gap:10px; }
   .row > * { flex:1; }
 </style>
 </head>
 <body>
-  <h1>SPC700 Assembler (HTML/JS)</h1>
+  <h1>SPC700 Assembler</h1>
 
   <div class="row">
     <div>
@@ -31,7 +32,7 @@ start:
   mov x,#$ef
   mov sp,x
 
-  mov $f4,#$aa        ; dp, #imm  → 8F AA F4
+  mov $f4,#$aa        ; ← ここが 8F AA F4 になるべき
   mov $f5,#$bb
 
 loop:
@@ -56,258 +57,136 @@ loop:
   <button onclick="clearOutput()">Clear</button>
 
 <script>
-// ============================================================
-// SPC700 Instruction Table (Sony syntax)
-// ============================================================
 const opcodes = {
-  // Implied / Register
-  "NOP":          {op:0x00, len:1},
-  "CLRP":         {op:0x20, len:1},
-  "SETP":         {op:0x40, len:1},
-  "CLRC":         {op:0x60, len:1},
-  "SETC":         {op:0x80, len:1},
-  "EI":           {op:0xA0, len:1},
-  "DI":           {op:0xC0, len:1},
-  "CLRV":         {op:0xE0, len:1},
-  "NOTC":         {op:0xED, len:1},
-  "SLEEP":        {op:0xEF, len:1},
-  "STOP":         {op:0xFF, len:1},
-  "BRK":          {op:0x0F, len:1},
-  "RET":          {op:0x6F, len:1},
-  "RETI":         {op:0x7F, len:1},
-  "XCN":          {op:0x9F, len:1},
-  "MUL":          {op:0xCF, len:1},
-  "DIV":          {op:0x9E, len:1},
-  "DAA":          {op:0xDF, len:1},
-  "DAS":          {op:0xBE, len:1},
+  // Implied
+  "NOP": {op:0x00,len:1}, "CLRP":{op:0x20,len:1}, "SETP":{op:0x40,len:1},
+  "CLRC":{op:0x60,len:1}, "SETC":{op:0x80,len:1}, "EI":{op:0xA0,len:1},
+  "DI":{op:0xC0,len:1}, "CLRV":{op:0xE0,len:1}, "NOTC":{op:0xED,len:1},
+  "SLEEP":{op:0xEF,len:1}, "STOP":{op:0xFF,len:1}, "BRK":{op:0x0F,len:1},
+  "RET":{op:0x6F,len:1}, "RETI":{op:0x7F,len:1}, "XCN":{op:0x9F,len:1},
+  "MUL":{op:0xCF,len:1}, "DIV":{op:0x9E,len:1}, "DAA":{op:0xDF,len:1},
+  "DAS":{op:0xBE,len:1},
 
-  // PUSH / POP
-  "PUSH A":       {op:0x2D, len:1},
-  "PUSH X":       {op:0x4D, len:1},
-  "PUSH Y":       {op:0x6D, len:1},
-  "PUSH PSW":     {op:0x0D, len:1},
-  "POP A":        {op:0xAE, len:1},
-  "POP X":        {op:0xCE, len:1},
-  "POP Y":        {op:0xEE, len:1},
-  "POP PSW":      {op:0x8E, len:1},
+  // PUSH/POP
+  "PUSH A":{op:0x2D,len:1}, "PUSH X":{op:0x4D,len:1}, "PUSH Y":{op:0x6D,len:1},
+  "PUSH PSW":{op:0x0D,len:1},
+  "POP A":{op:0xAE,len:1}, "POP X":{op:0xCE,len:1}, "POP Y":{op:0xEE,len:1},
+  "POP PSW":{op:0x8E,len:1},
 
-  // MOV register <-> register
-  "MOV A,X":      {op:0x7D, len:1},
-  "MOV A,Y":      {op:0xDD, len:1},
-  "MOV X,A":      {op:0x5D, len:1},
-  "MOV Y,A":      {op:0xFD, len:1},
-  "MOV X,SP":     {op:0x9D, len:1},
-  "MOV SP,X":     {op:0xBD, len:1},
-  "MOV A,(X)":    {op:0xE6, len:1},
-  "MOV A,(X)+":   {op:0xBF, len:1},
-  "MOV (X),A":    {op:0xC6, len:1},
-  "MOV (X)+,A":   {op:0xAF, len:1},
+  // MOV reg
+  "MOV A,X":{op:0x7D,len:1}, "MOV A,Y":{op:0xDD,len:1},
+  "MOV X,A":{op:0x5D,len:1}, "MOV Y,A":{op:0xFD,len:1},
+  "MOV X,SP":{op:0x9D,len:1}, "MOV SP,X":{op:0xBD,len:1},
+  "MOV A,(X)":{op:0xE6,len:1}, "MOV A,(X)+":{op:0xBF,len:1},
+  "MOV (X),A":{op:0xC6,len:1}, "MOV (X)+,A":{op:0xAF,len:1},
 
-  // MOV immediate
-  "MOV A,#imm":   {op:0xE8, len:2},
-  "MOV X,#imm":   {op:0xCD, len:2},
-  "MOV Y,#imm":   {op:0x8D, len:2},
+  // MOV imm
+  "MOV A,#imm":{op:0xE8,len:2}, "MOV X,#imm":{op:0xCD,len:2}, "MOV Y,#imm":{op:0x8D,len:2},
 
-  // MOV direct page
-  "MOV A,dp":     {op:0xE4, len:2},
-  "MOV A,dp+X":   {op:0xF4, len:2},
-  "MOV X,dp":     {op:0xF8, len:2},
-  "MOV X,dp+Y":   {op:0xF9, len:2},
-  "MOV Y,dp":     {op:0xEB, len:2},
-  "MOV Y,dp+X":   {op:0xFB, len:2},
-  "MOV dp,A":     {op:0xC4, len:2},
-  "MOV dp+X,A":   {op:0xD4, len:2},
-  "MOV dp,X":     {op:0xD8, len:2},
-  "MOV dp+Y,X":   {op:0xD9, len:2},
-  "MOV dp,Y":     {op:0xCB, len:2},
-  "MOV dp+X,Y":   {op:0xDB, len:2},
+  // MOV dp
+  "MOV A,dp":{op:0xE4,len:2}, "MOV A,dp+X":{op:0xF4,len:2},
+  "MOV X,dp":{op:0xF8,len:2}, "MOV X,dp+Y":{op:0xF9,len:2},
+  "MOV Y,dp":{op:0xEB,len:2}, "MOV Y,dp+X":{op:0xFB,len:2},
+  "MOV dp,A":{op:0xC4,len:2}, "MOV dp+X,A":{op:0xD4,len:2},
+  "MOV dp,X":{op:0xD8,len:2}, "MOV dp+Y,X":{op:0xD9,len:2},
+  "MOV dp,Y":{op:0xCB,len:2}, "MOV dp+X,Y":{op:0xDB,len:2},
 
-  // MOV absolute
-  "MOV A,!abs":   {op:0xE5, len:3},
-  "MOV A,!abs+X": {op:0xF5, len:3},
-  "MOV A,!abs+Y": {op:0xF6, len:3},
-  "MOV X,!abs":   {op:0xE9, len:3},
-  "MOV Y,!abs":   {op:0xEC, len:3},
-  "MOV !abs,A":   {op:0xC5, len:3},
-  "MOV !abs+X,A": {op:0xD5, len:3},
-  "MOV !abs+Y,A": {op:0xD6, len:3},
-  "MOV !abs,X":   {op:0xC9, len:3},
-  "MOV !abs,Y":   {op:0xCC, len:3},
+  // MOV abs
+  "MOV A,!abs":{op:0xE5,len:3}, "MOV A,!abs+X":{op:0xF5,len:3}, "MOV A,!abs+Y":{op:0xF6,len:3},
+  "MOV X,!abs":{op:0xE9,len:3}, "MOV Y,!abs":{op:0xEC,len:3},
+  "MOV !abs,A":{op:0xC5,len:3}, "MOV !abs+X,A":{op:0xD5,len:3}, "MOV !abs+Y,A":{op:0xD6,len:3},
+  "MOV !abs,X":{op:0xC9,len:3}, "MOV !abs,Y":{op:0xCC,len:3},
 
   // MOV indirect
-  "MOV A,[dp+X]": {op:0xE7, len:2},
-  "MOV A,[dp]+Y": {op:0xF7, len:2},
-  "MOV [dp+X],A": {op:0xC7, len:2},
-  "MOV [dp]+Y,A": {op:0xD7, len:2},
+  "MOV A,[dp+X]":{op:0xE7,len:2}, "MOV A,[dp]+Y":{op:0xF7,len:2},
+  "MOV [dp+X],A":{op:0xC7,len:2}, "MOV [dp]+Y,A":{op:0xD7,len:2},
 
-  // MOV dp,dp / dp,#imm   ★ バイナリ順が逆
-  "MOV dp,dp":    {op:0xFA, len:3, reverse:true},
-  "MOV dp,#imm":  {op:0x8F, len:3, reverse:true},
+  // ★ これらはバイナリでソース/即値が先
+  "MOV dp,#imm":{op:0x8F,len:3, reverse:true},
+  "MOV dp,dp":  {op:0xFA,len:3, reverse:true},
 
   // ADC
-  "ADC A,#imm":   {op:0x88, len:2},
-  "ADC A,dp":     {op:0x84, len:2},
-  "ADC A,dp+X":   {op:0x94, len:2},
-  "ADC A,!abs":   {op:0x85, len:3},
-  "ADC A,!abs+X": {op:0x95, len:3},
-  "ADC A,!abs+Y": {op:0x96, len:3},
-  "ADC A,(X)":    {op:0x86, len:1},
-  "ADC A,[dp+X]": {op:0x87, len:2},
-  "ADC A,[dp]+Y": {op:0x97, len:2},
-  "ADC (X),(Y)":  {op:0x99, len:1},
-  "ADC dp,#imm":  {op:0x98, len:3, reverse:true},
-  "ADC dp,dp":    {op:0x89, len:3, reverse:true},
+  "ADC A,#imm":{op:0x88,len:2}, "ADC A,dp":{op:0x84,len:2}, "ADC A,dp+X":{op:0x94,len:2},
+  "ADC A,!abs":{op:0x85,len:3}, "ADC A,!abs+X":{op:0x95,len:3}, "ADC A,!abs+Y":{op:0x96,len:3},
+  "ADC A,(X)":{op:0x86,len:1}, "ADC A,[dp+X]":{op:0x87,len:2}, "ADC A,[dp]+Y":{op:0x97,len:2},
+  "ADC (X),(Y)":{op:0x99,len:1},
+  "ADC dp,#imm":{op:0x98,len:3, reverse:true},
+  "ADC dp,dp":  {op:0x89,len:3, reverse:true},
 
   // SBC
-  "SBC A,#imm":   {op:0xA8, len:2},
-  "SBC A,dp":     {op:0xA4, len:2},
-  "SBC A,dp+X":   {op:0xB4, len:2},
-  "SBC A,!abs":   {op:0xA5, len:3},
-  "SBC A,!abs+X": {op:0xB5, len:3},
-  "SBC A,!abs+Y": {op:0xB6, len:3},
-  "SBC A,(X)":    {op:0xA6, len:1},
-  "SBC A,[dp+X]": {op:0xA7, len:2},
-  "SBC A,[dp]+Y": {op:0xB7, len:2},
-  "SBC (X),(Y)":  {op:0xB9, len:1},
-  "SBC dp,#imm":  {op:0xB8, len:3, reverse:true},
-  "SBC dp,dp":    {op:0xA9, len:3, reverse:true},
+  "SBC A,#imm":{op:0xA8,len:2}, "SBC A,dp":{op:0xA4,len:2}, "SBC A,dp+X":{op:0xB4,len:2},
+  "SBC A,!abs":{op:0xA5,len:3}, "SBC A,!abs+X":{op:0xB5,len:3}, "SBC A,!abs+Y":{op:0xB6,len:3},
+  "SBC A,(X)":{op:0xA6,len:1}, "SBC A,[dp+X]":{op:0xA7,len:2}, "SBC A,[dp]+Y":{op:0xB7,len:2},
+  "SBC (X),(Y)":{op:0xB9,len:1},
+  "SBC dp,#imm":{op:0xB8,len:3, reverse:true},
+  "SBC dp,dp":  {op:0xA9,len:3, reverse:true},
 
   // CMP
-  "CMP A,#imm":   {op:0x68, len:2},
-  "CMP A,dp":     {op:0x64, len:2},
-  "CMP A,dp+X":   {op:0x74, len:2},
-  "CMP A,!abs":   {op:0x65, len:3},
-  "CMP A,!abs+X": {op:0x75, len:3},
-  "CMP A,!abs+Y": {op:0x76, len:3},
-  "CMP A,(X)":    {op:0x66, len:1},
-  "CMP A,[dp+X]": {op:0x67, len:2},
-  "CMP A,[dp]+Y": {op:0x77, len:2},
-  "CMP (X),(Y)":  {op:0x79, len:1},
-  "CMP X,#imm":   {op:0xC8, len:2},
-  "CMP X,dp":     {op:0x3E, len:2},
-  "CMP X,!abs":   {op:0x1E, len:3},
-  "CMP Y,#imm":   {op:0xAD, len:2},
-  "CMP Y,dp":     {op:0x7E, len:2},
-  "CMP Y,!abs":   {op:0x5E, len:3},
-  "CMP dp,#imm":  {op:0x78, len:3, reverse:true},
-  "CMP dp,dp":    {op:0x69, len:3, reverse:true},
+  "CMP A,#imm":{op:0x68,len:2}, "CMP A,dp":{op:0x64,len:2}, "CMP A,dp+X":{op:0x74,len:2},
+  "CMP A,!abs":{op:0x65,len:3}, "CMP A,!abs+X":{op:0x75,len:3}, "CMP A,!abs+Y":{op:0x76,len:3},
+  "CMP A,(X)":{op:0x66,len:1}, "CMP A,[dp+X]":{op:0x67,len:2}, "CMP A,[dp]+Y":{op:0x77,len:2},
+  "CMP (X),(Y)":{op:0x79,len:1},
+  "CMP X,#imm":{op:0xC8,len:2}, "CMP X,dp":{op:0x3E,len:2}, "CMP X,!abs":{op:0x1E,len:3},
+  "CMP Y,#imm":{op:0xAD,len:2}, "CMP Y,dp":{op:0x7E,len:2}, "CMP Y,!abs":{op:0x5E,len:3},
+  "CMP dp,#imm":{op:0x78,len:3, reverse:true},
+  "CMP dp,dp":  {op:0x69,len:3, reverse:true},
 
-  // AND / OR / EOR
-  "AND A,#imm":   {op:0x28, len:2},
-  "AND A,dp":     {op:0x24, len:2},
-  "AND A,dp+X":   {op:0x34, len:2},
-  "AND A,!abs":   {op:0x25, len:3},
-  "AND A,!abs+X": {op:0x35, len:3},
-  "AND A,!abs+Y": {op:0x36, len:3},
-  "AND A,(X)":    {op:0x26, len:1},
-  "AND A,[dp+X]": {op:0x27, len:2},
-  "AND A,[dp]+Y": {op:0x37, len:2},
-  "AND (X),(Y)":  {op:0x39, len:1},
-  "AND dp,#imm":  {op:0x38, len:3, reverse:true},
-  "AND dp,dp":    {op:0x29, len:3, reverse:true},
+  // AND OR EOR
+  "AND A,#imm":{op:0x28,len:2}, "AND A,dp":{op:0x24,len:2}, "AND A,dp+X":{op:0x34,len:2},
+  "AND A,!abs":{op:0x25,len:3}, "AND A,!abs+X":{op:0x35,len:3}, "AND A,!abs+Y":{op:0x36,len:3},
+  "AND A,(X)":{op:0x26,len:1}, "AND A,[dp+X]":{op:0x27,len:2}, "AND A,[dp]+Y":{op:0x37,len:2},
+  "AND (X),(Y)":{op:0x39,len:1},
+  "AND dp,#imm":{op:0x38,len:3, reverse:true},
+  "AND dp,dp":  {op:0x29,len:3, reverse:true},
 
-  "OR A,#imm":    {op:0x08, len:2},
-  "OR A,dp":      {op:0x04, len:2},
-  "OR A,dp+X":    {op:0x14, len:2},
-  "OR A,!abs":    {op:0x05, len:3},
-  "OR A,!abs+X":  {op:0x15, len:3},
-  "OR A,!abs+Y":  {op:0x16, len:3},
-  "OR A,(X)":     {op:0x06, len:1},
-  "OR A,[dp+X]":  {op:0x07, len:2},
-  "OR A,[dp]+Y":  {op:0x17, len:2},
-  "OR (X),(Y)":   {op:0x19, len:1},
-  "OR dp,#imm":   {op:0x18, len:3, reverse:true},
-  "OR dp,dp":     {op:0x09, len:3, reverse:true},
+  "OR A,#imm":{op:0x08,len:2}, "OR A,dp":{op:0x04,len:2}, "OR A,dp+X":{op:0x14,len:2},
+  "OR A,!abs":{op:0x05,len:3}, "OR A,!abs+X":{op:0x15,len:3}, "OR A,!abs+Y":{op:0x16,len:3},
+  "OR A,(X)":{op:0x06,len:1}, "OR A,[dp+X]":{op:0x07,len:2}, "OR A,[dp]+Y":{op:0x17,len:2},
+  "OR (X),(Y)":{op:0x19,len:1},
+  "OR dp,#imm":{op:0x18,len:3, reverse:true},
+  "OR dp,dp":  {op:0x09,len:3, reverse:true},
 
-  "EOR A,#imm":   {op:0x48, len:2},
-  "EOR A,dp":     {op:0x44, len:2},
-  "EOR A,dp+X":   {op:0x54, len:2},
-  "EOR A,!abs":   {op:0x45, len:3},
-  "EOR A,!abs+X": {op:0x55, len:3},
-  "EOR A,!abs+Y": {op:0x56, len:3},
-  "EOR A,(X)":    {op:0x46, len:1},
-  "EOR A,[dp+X]": {op:0x47, len:2},
-  "EOR A,[dp]+Y": {op:0x57, len:2},
-  "EOR (X),(Y)":  {op:0x59, len:1},
-  "EOR dp,#imm":  {op:0x58, len:3, reverse:true},
-  "EOR dp,dp":    {op:0x49, len:3, reverse:true},
+  "EOR A,#imm":{op:0x48,len:2}, "EOR A,dp":{op:0x44,len:2}, "EOR A,dp+X":{op:0x54,len:2},
+  "EOR A,!abs":{op:0x45,len:3}, "EOR A,!abs+X":{op:0x55,len:3}, "EOR A,!abs+Y":{op:0x56,len:3},
+  "EOR A,(X)":{op:0x46,len:1}, "EOR A,[dp+X]":{op:0x47,len:2}, "EOR A,[dp]+Y":{op:0x57,len:2},
+  "EOR (X),(Y)":{op:0x59,len:1},
+  "EOR dp,#imm":{op:0x58,len:3, reverse:true},
+  "EOR dp,dp":  {op:0x49,len:3, reverse:true},
 
-  // INC / DEC
-  "INC A":        {op:0xBC, len:1},
-  "INC X":        {op:0x3D, len:1},
-  "INC Y":        {op:0xFC, len:1},
-  "INC dp":       {op:0xAB, len:2},
-  "INC dp+X":     {op:0xBB, len:2},
-  "INC !abs":     {op:0xAC, len:3},
-  "DEC A":        {op:0x9C, len:1},
-  "DEC X":        {op:0x1D, len:1},
-  "DEC Y":        {op:0xDC, len:1},
-  "DEC dp":       {op:0x8B, len:2},
-  "DEC dp+X":     {op:0x9B, len:2},
-  "DEC !abs":     {op:0x8C, len:3},
+  // INC DEC
+  "INC A":{op:0xBC,len:1}, "INC X":{op:0x3D,len:1}, "INC Y":{op:0xFC,len:1},
+  "INC dp":{op:0xAB,len:2}, "INC dp+X":{op:0xBB,len:2}, "INC !abs":{op:0xAC,len:3},
+  "DEC A":{op:0x9C,len:1}, "DEC X":{op:0x1D,len:1}, "DEC Y":{op:0xDC,len:1},
+  "DEC dp":{op:0x8B,len:2}, "DEC dp+X":{op:0x9B,len:2}, "DEC !abs":{op:0x8C,len:3},
 
-  // ASL / LSR / ROL / ROR
-  "ASL A":        {op:0x1C, len:1},
-  "ASL dp":       {op:0x0B, len:2},
-  "ASL dp+X":     {op:0x1B, len:2},
-  "ASL !abs":     {op:0x0C, len:3},
-  "LSR A":        {op:0x5C, len:1},
-  "LSR dp":       {op:0x4B, len:2},
-  "LSR dp+X":     {op:0x5B, len:2},
-  "LSR !abs":     {op:0x4C, len:3},
-  "ROL A":        {op:0x3C, len:1},
-  "ROL dp":       {op:0x2B, len:2},
-  "ROL dp+X":     {op:0x3B, len:2},
-  "ROL !abs":     {op:0x2C, len:3},
-  "ROR A":        {op:0x7C, len:1},
-  "ROR dp":       {op:0x6B, len:2},
-  "ROR dp+X":     {op:0x7B, len:2},
-  "ROR !abs":     {op:0x6C, len:3},
+  // Shift
+  "ASL A":{op:0x1C,len:1}, "ASL dp":{op:0x0B,len:2}, "ASL dp+X":{op:0x1B,len:2}, "ASL !abs":{op:0x0C,len:3},
+  "LSR A":{op:0x5C,len:1}, "LSR dp":{op:0x4B,len:2}, "LSR dp+X":{op:0x5B,len:2}, "LSR !abs":{op:0x4C,len:3},
+  "ROL A":{op:0x3C,len:1}, "ROL dp":{op:0x2B,len:2}, "ROL dp+X":{op:0x3B,len:2}, "ROL !abs":{op:0x2C,len:3},
+  "ROR A":{op:0x7C,len:1}, "ROR dp":{op:0x6B,len:2}, "ROR dp+X":{op:0x7B,len:2}, "ROR !abs":{op:0x6C,len:3},
 
-  // Word ops
-  "MOVW YA,dp":   {op:0xBA, len:2},
-  "MOVW dp,YA":   {op:0xDA, len:2},
-  "INCW dp":      {op:0x3A, len:2},
-  "DECW dp":      {op:0x1A, len:2},
-  "ADDW YA,dp":   {op:0x7A, len:2},
-  "SUBW YA,dp":   {op:0x9A, len:2},
-  "CMPW YA,dp":   {op:0x5A, len:2},
+  // Word
+  "MOVW YA,dp":{op:0xBA,len:2}, "MOVW dp,YA":{op:0xDA,len:2},
+  "INCW dp":{op:0x3A,len:2}, "DECW dp":{op:0x1A,len:2},
+  "ADDW YA,dp":{op:0x7A,len:2}, "SUBW YA,dp":{op:0x9A,len:2}, "CMPW YA,dp":{op:0x5A,len:2},
 
-  // Branches
-  "BRA rel":      {op:0x2F, len:2},
-  "BEQ rel":      {op:0xF0, len:2},
-  "BNE rel":      {op:0xD0, len:2},
-  "BCS rel":      {op:0xB0, len:2},
-  "BCC rel":      {op:0x90, len:2},
-  "BVS rel":      {op:0x70, len:2},
-  "BVC rel":      {op:0x50, len:2},
-  "BMI rel":      {op:0x30, len:2},
-  "BPL rel":      {op:0x10, len:2},
+  // Branch
+  "BRA rel":{op:0x2F,len:2}, "BEQ rel":{op:0xF0,len:2}, "BNE rel":{op:0xD0,len:2},
+  "BCS rel":{op:0xB0,len:2}, "BCC rel":{op:0x90,len:2}, "BVS rel":{op:0x70,len:2},
+  "BVC rel":{op:0x50,len:2}, "BMI rel":{op:0x30,len:2}, "BPL rel":{op:0x10,len:2},
 
-  // CALL / JMP
-  "CALL !abs":    {op:0x3F, len:3},
-  "JMP !abs":     {op:0x5F, len:3},
-  "JMP [!abs+X]": {op:0x1F, len:3},
-  "PCALL upage":  {op:0x4F, len:2},
+  // Call/Jump
+  "CALL !abs":{op:0x3F,len:3}, "JMP !abs":{op:0x5F,len:3},
+  "JMP [!abs+X]":{op:0x1F,len:3}, "PCALL upage":{op:0x4F,len:2},
 
-  // Bit / special
-  "SET1 dp.bit":  {op:0x02, len:2},
-  "CLR1 dp.bit":  {op:0x12, len:2},
-  "BBS dp.bit,rel":{op:0x03, len:3},
-  "BBC dp.bit,rel":{op:0x13, len:3},
-  "CBNE dp,rel":  {op:0x2E, len:3},
-  "CBNE dp+X,rel":{op:0xDE, len:3},
-  "DBNZ dp,rel":  {op:0x6E, len:3},
-  "DBNZ Y,rel":   {op:0xFE, len:2},
+  // Bit
+  "SET1 dp.bit":{op:0x02,len:2}, "CLR1 dp.bit":{op:0x12,len:2},
+  "BBS dp.bit,rel":{op:0x03,len:3}, "BBC dp.bit,rel":{op:0x13,len:3},
+  "CBNE dp,rel":{op:0x2E,len:3}, "CBNE dp+X,rel":{op:0xDE,len:3},
+  "DBNZ dp,rel":{op:0x6E,len:3}, "DBNZ Y,rel":{op:0xFE,len:2},
 };
 
-// ============================================================
-// Assembler
-// ============================================================
-let binary = [];
-let labels = {};
-let errors = [];
-let currentAddr = 0x0200;
+let binary = [], labels = {}, errors = [], currentAddr = 0x0200;
 
 function parseNumber(str) {
   str = String(str).trim().toLowerCase();
@@ -321,22 +200,17 @@ function parseNumber(str) {
 
 function isNumber(str) {
   str = String(str).trim().toLowerCase();
-  return /^#?\$?[0-9a-f]+$/.test(str) ||
-         /^0x[0-9a-f]+$/.test(str) ||
-         /^%[01]+$/.test(str) ||
-         /^#?[0-9]+$/.test(str);
+  return /^#?\$?[0-9a-f]+$/.test(str) || /^0x[0-9a-f]+$/.test(str) ||
+         /^%[01]+$/.test(str) || /^#?[0-9]+$/.test(str);
 }
 
 function resolveOperand(op, pass) {
   op = String(op).trim();
   if (op.startsWith("!")) op = op.slice(1);
-
   if (isNumber(op)) return parseNumber(op);
-
   const key = op.toUpperCase();
   if (labels[key] !== undefined) return labels[key];
-
-  if (pass === 2) errors.push(`Undefined label: ${op}`);
+  if (pass === 2) errors.push("Undefined label: " + op);
   return 0;
 }
 
@@ -344,11 +218,10 @@ function assembleLine(line, pass) {
   line = line.replace(/;.*$/, "").trim();
   if (!line) return;
 
-  // Label
   if (line.endsWith(":")) {
     const name = line.slice(0, -1).trim().toUpperCase();
     if (pass === 1) {
-      if (labels[name] !== undefined) errors.push(`Duplicate label: ${name}`);
+      if (labels[name] !== undefined) errors.push("Duplicate label: " + name);
       labels[name] = currentAddr;
     }
     return;
@@ -357,15 +230,13 @@ function assembleLine(line, pass) {
   const parts = line.split(/\s+/);
   const dir = parts[0].toLowerCase();
 
-  // Directives
   if (dir === "org") {
     currentAddr = parseNumber(parts[1]);
     return;
   }
   if (dir === "db" || dir === ".db") {
     for (let i = 1; i < parts.length; i++) {
-      const tok = parts[i].replace(/,$/, "");
-      const v = resolveOperand(tok, pass) & 0xFF;
+      const v = resolveOperand(parts[i].replace(/,$/,""), pass) & 0xFF;
       if (pass === 2) binary.push(v);
       currentAddr++;
     }
@@ -373,8 +244,7 @@ function assembleLine(line, pass) {
   }
   if (dir === "dw" || dir === ".dw") {
     for (let i = 1; i < parts.length; i++) {
-      const tok = parts[i].replace(/,$/, "");
-      const v = resolveOperand(tok, pass) & 0xFFFF;
+      const v = resolveOperand(parts[i].replace(/,$/,""), pass) & 0xFFFF;
       if (pass === 2) {
         binary.push(v & 0xFF);
         binary.push((v >> 8) & 0xFF);
@@ -384,54 +254,45 @@ function assembleLine(line, pass) {
     return;
   }
 
-  // Instruction
   let mnemonic = parts[0].toUpperCase();
   let operands = parts.slice(1).join(" ").toUpperCase().replace(/\s+/g, "");
 
-  // TCALL n
+  // TCALL
   if (mnemonic === "TCALL") {
     const n = parseNumber(operands) & 0x0F;
     if (pass === 2) binary.push(0x01 + n * 0x10);
-    currentAddr += 1;
+    currentAddr++;
     return;
   }
 
   // SET1 / CLR1 / BBS / BBC
   if (["SET1","CLR1","BBS","BBC"].includes(mnemonic)) {
-    const m = operands.match(/^(\$?[0-9A-F]+|[A-Z_][A-Z0-9_]*)\.([0-7])(?:,(.+))?$/i);
-    if (!m) {
-      errors.push(`Invalid bit syntax: ${line}`);
-      return;
-    }
+    const m = operands.match(/^(.+)\.([0-7])(?:,(.+))?$/);
+    if (!m) { errors.push("Invalid bit: " + line); return; }
     const dp = resolveOperand(m[1], pass) & 0xFF;
-    const bit = parseInt(m[2], 10);
+    const bit = +m[2];
     const base = {SET1:0x02, CLR1:0x12, BBS:0x03, BBC:0x13}[mnemonic];
-    const op = base + bit * 0x20;
-
-    if (pass === 2) binary.push(op);
+    if (pass === 2) binary.push(base + bit * 0x20);
     currentAddr++;
     if (pass === 2) binary.push(dp);
     currentAddr++;
-
-    if (mnemonic === "BBS" || mnemonic === "BBC") {
-      const target = resolveOperand(m[3], pass);
-      const rel = (target - (currentAddr + 1)) & 0xFF;
+    if (m[3]) {
+      const rel = (resolveOperand(m[3], pass) - (currentAddr + 1)) & 0xFF;
       if (pass === 2) binary.push(rel);
       currentAddr++;
     }
     return;
   }
 
-  // Normal match
+  // 通常命令
   let matched = false;
-  const candidates = Object.keys(opcodes).filter(k =>
-    k === mnemonic || k.startsWith(mnemonic + " ")
-  );
+  for (const key of Object.keys(opcodes)) {
+    if (!(key === mnemonic || key.startsWith(mnemonic + " "))) continue;
 
-  for (const key of candidates) {
     const def = opcodes[key];
-    const pattern = key.slice(mnemonic.length).trim();
+    const pattern = key.slice(mnemonic.length).trim(); // "A,#imm" など
 
+    // implied
     if (!pattern) {
       if (!operands) {
         if (pass === 2) binary.push(def.op);
@@ -442,65 +303,62 @@ function assembleLine(line, pass) {
       continue;
     }
 
-    let regexStr = pattern
+    // 正規表現を作る
+    let reStr = pattern
       .replace(/\+/g, "\\+")
       .replace(/\[/g, "\\[")
       .replace(/\]/g, "\\]")
-      .replace(/!abs/g, "(!?[\\$0-9A-Fa-f]+|[A-Za-z_][A-Za-z0-9_]*)")
-      .replace(/dp/g, "([\\$0-9A-Fa-f]+|[A-Za-z_][A-Za-z0-9_]*)")
+      .replace(/!abs/g, "(!?[\\$0-9A-Fa-f]+|[A-Za-z_][\\w]*)")
+      .replace(/dp/g, "([\\$0-9A-Fa-f]+|[A-Za-z_][\\w]*)")
       .replace(/#imm/g, "(#?[\\$0-9A-Fa-f]+)")
-      .replace(/rel/g, "([A-Za-z_][A-Za-z0-9_]*|[\\$0-9A-Fa-f]+)")
+      .replace(/rel/g, "([A-Za-z_][\\w]*|[\\$0-9A-Fa-f]+)")
       .replace(/upage/g, "([\\$0-9A-Fa-f]+)");
 
-    const re = new RegExp("^" + regexStr + "$", "i");
+    const re = new RegExp("^" + reStr + "$", "i");
     const m = operands.match(re);
     if (!m) continue;
 
-    // emit opcode
+    // ---- ここからオペランド出力 ----
     if (pass === 2) binary.push(def.op);
     currentAddr++;
 
-    // emit operands
-    if (pattern.includes("#imm") && !pattern.includes("dp")) {
-      // simple immediate (A,#imm etc.)
+    if (def.reverse) {
+      // ★ 重要：ソース（右）を先、デスト（左）を後
+      // m[1] = 左 (dp / dest)
+      // m[2] = 右 (#imm or dp / src)
+      const left  = resolveOperand(m[1], pass) & 0xFF;
+      const right = resolveOperand(m[2], pass) & 0xFF;
+      if (pass === 2) {
+        binary.push(right); // imm or source が先
+        binary.push(left);  // dest が後
+      }
+      currentAddr += 2;
+    }
+    else if (pattern.includes("#imm")) {
+      // 普通の即値 (A,#imm など)
       const val = resolveOperand(m[1], pass) & 0xFF;
       if (pass === 2) binary.push(val);
       currentAddr++;
     }
     else if (pattern.includes("!abs")) {
-      let addr = resolveOperand(m[1], pass) & 0xFFFF;
+      const addr = resolveOperand(m[1], pass) & 0xFFFF;
       if (pass === 2) {
         binary.push(addr & 0xFF);
         binary.push((addr >> 8) & 0xFF);
       }
       currentAddr += 2;
     }
-    else if (pattern === "dp,#imm" || pattern === "dp,dp") {
-      // ★ 逆順：ソース（右）を先に、デスト（左）を後に
-      const left  = resolveOperand(m[1], pass) & 0xFF; // dest
-      const right = resolveOperand(m[2], pass) & 0xFF; // src / imm
-
-      if (pass === 2) {
-        binary.push(right); // imm or source first
-        binary.push(left);  // dest second
-      }
-      currentAddr += 2;
-    }
     else if (pattern.includes("dp") && !pattern.includes("rel")) {
-      // single dp
       const val = resolveOperand(m[1], pass) & 0xFF;
       if (pass === 2) binary.push(val);
       currentAddr++;
     }
     else if (pattern.includes("rel")) {
       const target = resolveOperand(m[1], pass);
-      const nextPC = currentAddr + 1;
-      let rel = (target - nextPC) & 0xFF;
+      const rel = (target - (currentAddr + 1)) & 0xFF;
       if (pass === 2) {
-        const signed = rel > 127 ? rel - 256 : rel;
-        if (signed < -128 || signed > 127) {
-          errors.push(`Branch out of range: ${line}`);
-        }
+        const s = rel > 127 ? rel - 256 : rel;
+        if (s < -128 || s > 127) errors.push("Branch out of range: " + line);
         binary.push(rel);
       }
       currentAddr++;
@@ -515,25 +373,20 @@ function assembleLine(line, pass) {
     break;
   }
 
-  if (!matched) {
-    errors.push(`Unknown instruction: ${line}`);
-  }
+  if (!matched) errors.push("Unknown instruction: " + line);
 }
 
 function assemble() {
   const src = document.getElementById("source").value;
   const lines = src.split("\n");
-  errors = [];
-  labels = {};
-  binary = [];
-  currentAddr = 0x0200;
+  errors = []; labels = {}; binary = []; currentAddr = 0x0200;
 
   // Pass 1
   for (let raw of lines) {
     let line = raw.replace(/;.*$/, "").trim();
     if (!line) continue;
-    if (/=/.test(line) || line.toLowerCase().startsWith("equ")) {
-      const m = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*(?:=\s*|equ\s+)(.+)$/i);
+    if (/=/.test(line) || /^equ\b/i.test(line)) {
+      const m = line.match(/^(\w+)\s*(?:=\s*|equ\s+)(.+)/i);
       if (m) labels[m[1].toUpperCase()] = parseNumber(m[2]);
       continue;
     }
@@ -541,43 +394,44 @@ function assemble() {
   }
 
   // Pass 2
-  binary = [];
-  currentAddr = 0x0200;
+  binary = []; currentAddr = 0x0200;
   for (let raw of lines) {
     let line = raw.replace(/;.*$/, "").trim();
     if (!line) continue;
-    if (/=/.test(line) || line.toLowerCase().startsWith("equ")) continue;
+    if (/=/.test(line) || /^equ\b/i.test(line)) continue;
     assembleLine(line, 2);
   }
 
-  // Output
+  // 表示
   let out = "";
   if (errors.length) {
     out += "<span class='error'>Errors:\n" + errors.join("\n") + "</span>\n\n";
+  } else {
+    out += "<span class='ok'>Assemble OK</span>\n\n";
   }
 
-  out += `<span class='info'>Labels:</span>\n`;
+  out += "<span class='info'>Labels:</span>\n";
   for (const k of Object.keys(labels).sort()) {
     out += `  ${k.padEnd(12)} = $${labels[k].toString(16).toUpperCase().padStart(4,"0")}\n`;
   }
 
   out += `\n<span class='info'>Binary (${binary.length} bytes) @ $0200:</span>\n`;
   for (let i = 0; i < binary.length; i += 16) {
-    const addr = (0x0200 + i).toString(16).toUpperCase().padStart(4, "0");
-    const hex = binary.slice(i, i + 16)
-      .map(b => b.toString(16).toUpperCase().padStart(2, "0"))
-      .join(" ");
+    const addr = (0x0200 + i).toString(16).toUpperCase().padStart(4,"0");
+    const hex = binary.slice(i,i+16).map(b=>b.toString(16).toUpperCase().padStart(2,"0")).join(" ");
     out += `${addr}: ${hex}\n`;
   }
+
+  // 特に mov $f4,#$aa の確認用
+  out += "\n<span class='info'>Check mov $f4,#$aa → should be 8F AA F4</span>\n";
 
   document.getElementById("output").innerHTML = out;
 }
 
 function downloadBin() {
   if (!binary.length) { alert("Assemble first"); return; }
-  const blob = new Blob([new Uint8Array(binary)], {type:"application/octet-stream"});
   const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
+  a.href = URL.createObjectURL(new Blob([new Uint8Array(binary)]));
   a.download = "spc700.bin";
   a.click();
 }
