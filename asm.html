@@ -53,7 +53,7 @@ loop:
   </div>
 
   <button onclick="assemble()">Assemble</button>
-  <button onclick="downloadBin()">Download .bin</button>
+  <button onclick="downloadBin()">Download .bin (64KB)</button>
   <button onclick="clearOutput()">Clear</button>
 
 <script>
@@ -186,7 +186,19 @@ const opcodes = {
   "DBNZ dp,rel":{op:0x6E,len:3}, "DBNZ Y,rel":{op:0xFE,len:2},
 };
 
-let binary = [], labels = {}, errors = [], currentAddr = 0x0200;
+const RAM_SIZE = 65536; // 64KB
+let binary = new Uint8Array(RAM_SIZE), labels = {}, errors = [], currentAddr = 0x0000;
+let minWrittenAddr = RAM_SIZE, maxWrittenAddr = 0;
+
+function writeByte(addr, val) {
+  if (addr >= 0 && addr < RAM_SIZE) {
+    binary[addr] = val & 0xFF;
+    if (addr < minWrittenAddr) minWrittenAddr = addr;
+    if (addr > maxWrittenAddr) maxWrittenAddr = addr;
+  } else {
+    errors.push(`Address out of RAM range ($${addr.toString(16)})`);
+  }
+}
 
 function parseNumber(str) {
   str = String(str).trim().toLowerCase();
@@ -230,14 +242,14 @@ function assembleLine(line, pass) {
   const parts = line.split(/\s+/);
   const dir = parts[0].toLowerCase();
 
-  if (dir === "org") {
+  if (dir === "org" || dir === ".org") {
     currentAddr = parseNumber(parts[1]);
     return;
   }
   if (dir === "db" || dir === ".db") {
     for (let i = 1; i < parts.length; i++) {
       const v = resolveOperand(parts[i].replace(/,$/,""), pass) & 0xFF;
-      if (pass === 2) binary.push(v);
+      if (pass === 2) writeByte(currentAddr, v);
       currentAddr++;
     }
     return;
@@ -246,8 +258,8 @@ function assembleLine(line, pass) {
     for (let i = 1; i < parts.length; i++) {
       const v = resolveOperand(parts[i].replace(/,$/,""), pass) & 0xFFFF;
       if (pass === 2) {
-        binary.push(v & 0xFF);
-        binary.push((v >> 8) & 0xFF);
+        writeByte(currentAddr, v & 0xFF);
+        writeByte(currentAddr + 1, (v >> 8) & 0xFF);
       }
       currentAddr += 2;
     }
@@ -260,7 +272,7 @@ function assembleLine(line, pass) {
   // TCALL
   if (mnemonic === "TCALL") {
     const n = parseNumber(operands) & 0x0F;
-    if (pass === 2) binary.push(0x01 + n * 0x10);
+    if (pass === 2) writeByte(currentAddr, 0x01 + n * 0x10);
     currentAddr++;
     return;
   }
@@ -272,13 +284,14 @@ function assembleLine(line, pass) {
     const dp = resolveOperand(m[1], pass) & 0xFF;
     const bit = +m[2];
     const base = {SET1:0x02, CLR1:0x12, BBS:0x03, BBC:0x13}[mnemonic];
-    if (pass === 2) binary.push(base + bit * 0x20);
-    currentAddr++;
-    if (pass === 2) binary.push(dp);
-    currentAddr++;
+    if (pass === 2) {
+      writeByte(currentAddr, base + bit * 0x20);
+      writeByte(currentAddr + 1, dp);
+    }
+    currentAddr += 2;
     if (m[3]) {
       const rel = (resolveOperand(m[3], pass) - (currentAddr + 1)) & 0xFF;
-      if (pass === 2) binary.push(rel);
+      if (pass === 2) writeByte(currentAddr, rel);
       currentAddr++;
     }
     return;
@@ -295,7 +308,7 @@ function assembleLine(line, pass) {
     // implied
     if (!pattern) {
       if (!operands) {
-        if (pass === 2) binary.push(def.op);
+        if (pass === 2) writeByte(currentAddr, def.op);
         currentAddr += def.len;
         matched = true;
         break;
@@ -319,38 +332,35 @@ function assembleLine(line, pass) {
     if (!m) continue;
 
     // ---- ここからオペランド出力 ----
-    if (pass === 2) binary.push(def.op);
+    if (pass === 2) writeByte(currentAddr, def.op);
     currentAddr++;
 
     if (def.reverse) {
       // ★ 重要：ソース（右）を先、デスト（左）を後
-      // m[1] = 左 (dp / dest)
-      // m[2] = 右 (#imm or dp / src)
       const left  = resolveOperand(m[1], pass) & 0xFF;
       const right = resolveOperand(m[2], pass) & 0xFF;
       if (pass === 2) {
-        binary.push(right); // imm or source が先
-        binary.push(left);  // dest が後
+        writeByte(currentAddr, right);    // imm or source が先
+        writeByte(currentAddr + 1, left); // dest が後
       }
       currentAddr += 2;
     }
     else if (pattern.includes("#imm")) {
-      // 普通の即値 (A,#imm など)
       const val = resolveOperand(m[1], pass) & 0xFF;
-      if (pass === 2) binary.push(val);
+      if (pass === 2) writeByte(currentAddr, val);
       currentAddr++;
     }
     else if (pattern.includes("!abs")) {
       const addr = resolveOperand(m[1], pass) & 0xFFFF;
       if (pass === 2) {
-        binary.push(addr & 0xFF);
-        binary.push((addr >> 8) & 0xFF);
+        writeByte(currentAddr, addr & 0xFF);
+        writeByte(currentAddr + 1, (addr >> 8) & 0xFF);
       }
       currentAddr += 2;
     }
     else if (pattern.includes("dp") && !pattern.includes("rel")) {
       const val = resolveOperand(m[1], pass) & 0xFF;
-      if (pass === 2) binary.push(val);
+      if (pass === 2) writeByte(currentAddr, val);
       currentAddr++;
     }
     else if (pattern.includes("rel")) {
@@ -359,13 +369,13 @@ function assembleLine(line, pass) {
       if (pass === 2) {
         const s = rel > 127 ? rel - 256 : rel;
         if (s < -128 || s > 127) errors.push("Branch out of range: " + line);
-        binary.push(rel);
+        writeByte(currentAddr, rel);
       }
       currentAddr++;
     }
     else if (pattern.includes("upage")) {
       const val = resolveOperand(m[1], pass) & 0xFF;
-      if (pass === 2) binary.push(val);
+      if (pass === 2) writeByte(currentAddr, val);
       currentAddr++;
     }
 
@@ -379,7 +389,8 @@ function assembleLine(line, pass) {
 function assemble() {
   const src = document.getElementById("source").value;
   const lines = src.split("\n");
-  errors = []; labels = {}; binary = []; currentAddr = 0x0200;
+  errors = []; labels = {}; binary = new Uint8Array(RAM_SIZE);
+  currentAddr = 0x0000; minWrittenAddr = RAM_SIZE; maxWrittenAddr = 0;
 
   // Pass 1
   for (let raw of lines) {
@@ -394,7 +405,7 @@ function assemble() {
   }
 
   // Pass 2
-  binary = []; currentAddr = 0x0200;
+  currentAddr = 0x0000;
   for (let raw of lines) {
     let line = raw.replace(/;.*$/, "").trim();
     if (!line) continue;
@@ -415,24 +426,31 @@ function assemble() {
     out += `  ${k.padEnd(12)} = $${labels[k].toString(16).toUpperCase().padStart(4,"0")}\n`;
   }
 
-  out += `\n<span class='info'>Binary (${binary.length} bytes) @ $0200:</span>\n`;
-  for (let i = 0; i < binary.length; i += 16) {
-    const addr = (0x0200 + i).toString(16).toUpperCase().padStart(4,"0");
-    const hex = binary.slice(i,i+16).map(b=>b.toString(16).toUpperCase().padStart(2,"0")).join(" ");
-    out += `${addr}: ${hex}\n`;
+  out += `\n<span class='info'>RAM Image (Total: 65,536 bytes / 64KB):</span>\n`;
+  if (minWrittenAddr <= maxWrittenAddr) {
+    out += `<span class='info'>Showing code area ($${minWrittenAddr.toString(16).toUpperCase().padStart(4,"0")} - $${maxWrittenAddr.toString(16).toUpperCase().padStart(4,"0")}):</span>\n`;
+    const start = minWrittenAddr & ~0xF;
+    const end = Math.min(RAM_SIZE, (maxWrittenAddr | 0xF) + 1);
+    for (let i = start; i < end; i += 16) {
+      const addr = i.toString(16).toUpperCase().padStart(4,"0");
+      const hex = Array.from(binary.slice(i, i + 16))
+        .map(b => b.toString(16).toUpperCase().padStart(2,"0"))
+        .join(" ");
+      out += `${addr}: ${hex}\n`;
+    }
+  } else {
+    out += "No code generated.\n";
   }
-
-  // 特に mov $f4,#$aa の確認用
   out += "\n<span class='info'>Check mov $f4,#$aa → should be 8F AA F4</span>\n";
 
   document.getElementById("output").innerHTML = out;
 }
 
 function downloadBin() {
-  if (!binary.length) { alert("Assemble first"); return; }
+  if (!binary || binary.length === 0) { alert("Assemble first"); return; }
   const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([new Uint8Array(binary)]));
-  a.download = "spc700.bin";
+  a.href = URL.createObjectURL(new Blob([binary]));
+  a.download = "test.bin";
   a.click();
 }
 
